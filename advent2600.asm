@@ -142,7 +142,7 @@ FREE_RAM		EQU		[$100 - . - STACK_SPACE]d
 ;======================================-=======================================
 ;								   CONSTANTS
 
-			INCLUDE "colors.h"
+			INCLUDE "colors.asm"
 
 JOY_BUTTON	EQU %10000000
 JOY_RIGHT	EQU %01000000
@@ -180,10 +180,10 @@ JOY_UP		EQU %00001000
 ;		history, or the currently considered best move (or all of the above!).
 
 NormalFont:
-			INCLUDE "normal_font.h"
+			INCLUDE "normal_font.asm"
 
 ReversedFont:
-			INCLUDE "reversed_font.h"
+			INCLUDE "reversed_font.asm"
 
 ;======================================-=======================================
 ;								FONT_KERNEL MACRO
