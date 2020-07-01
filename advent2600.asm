@@ -106,12 +106,9 @@ TextBuffer:		DS.B	80	; The 10 column x 8 row character "frame" buffer
 ; A 40x48 pixel framebuffer would consume 240 bytes, which is slightly larger than our 128 bytes of RAM available
 
 ColorScheme:	DS.B	1	; Offset into which color scheme should be used
-Player0Txt:		DS.B	1	; Which font offset should the Player0 sprite use?
 
 ; Set these Y positions to anything > 80 to disable
-Player0Y:		DS.B	1	; Which vertical text line ((0 - 7) * 10) should the Player0 sprite draw on?
 Missile0Y:		DS.B	1	; Which vertical text line ((0 - 7) * 10) should the Missle0 draw on?
-Missile1Y:		DS.B	1	; Which vertical text line ((0 - 7) * 10) should the Missle1 draw on?
 
 TextCursor:		DS.B	1	; Offset into the TextBuffer, to help with dynamically generated text screens
 
@@ -121,18 +118,22 @@ DeciSeconds:	DS.B	1	; Deci-Second counter (1/10th of a second), for easier anima
 PrevJoysticks:	DS.B	1	; Previous value of the joysticks (player 0 upper nybble, 1 lower) (right, left, down, up)
 CurrJoysticks:	DS.B	1	; Current value of the joysticks (player 0 upper nybble, 1 lower) (right, left, down, up)
 
-StateCodePtr:	DS.W	1	; Address of the current demo state code
+; Finite state machine variables (RAM is limited, reuse is a requirement)
+StateCodePtr:	DS.W	1	; Address of the current state machine code
 StateTempVar1:	DS.B	1
-ScrollTextOffs:	EQU		StateTempVar1
-DemoOneTxtOffs: EQU		StateTempVar1
 StateTempVar2:	DS.B	1
-DemoOneFntOffs: EQU		StateTempVar2
 StateTempPtr1:	DS.W	1	; A pointer for the tele-typewriter style text output
+	; Used by InitMainMenu state
+MainMenuOffs:	EQU		StateTempVar2	; Offset into the main menu ROM data
+	; State machine variables for PresentLocDesc state
+PresentLocOffs:	EQU		StateTempVar1
 DescTextPtr:	EQU		StateTempPtr1
+	; Used by ScrollBottomMsg and states that call it (MainMenuInput, PlayerCmdInputState)
+ScrollTextOffs:	EQU		StateTempVar1
 ScrollTextPtr:	EQU		StateTempPtr1	; Text that scrolls at the bottom of the screen
-
-LibTempVar:		DS.B	1	; An often trashed temporary variable in RAM (used by DivideBy15, etc.)
-LibTempPtr:		DS.W	1	; A pointer argument for a library subroutine
+	; State machine variables for DemoOne state
+DemoOneTxtOffs: EQU		StateTempVar1
+DemoOneFntOffs: EQU		StateTempVar2
 
 		; Reserve *some* space for the stack...
 STACK_SPACE		EQU		8
@@ -211,8 +212,7 @@ ReversedFont:
 		MAC FONT_KERNEL
 .RASTER_FROM	SET {1}		;	Which PF shadow buffer to rasterize from
 .FONT_OFFSET	SET {2}		;	Font pixel scanline
-.SPRITE_OFFSET	SET {3}		;	Sprite scanline
-.TEXT_OFFSET	SET {4}		;	Additional offset into the text framebuffer
+.TEXT_OFFSET	SET {3}		;	Additional offset into the text framebuffer
 ; Y = Line offset into TextBuffer
 		IF .RASTER_FROM == PFBufferA
 .RENDER_TO		SET PFBufferB
@@ -233,7 +233,6 @@ ReversedFont:
 .RightPF2B:		SET	[.RENDER_TO + 5]
 .RevFont:		SET [ReversedFont + .FONT_OFFSET]
 .NormFont:		SET [NormalFont + .FONT_OFFSET]
-.SpriteFont:	SET [NormalFont + .SPRITE_OFFSET]
 .TxtBuffer:		SET [TextBuffer + .TEXT_OFFSET]
 		sta WSYNC					; 3
 ; Font Character Scanline 1:
@@ -247,13 +246,13 @@ ReversedFont:
 			lda .RevFont,x			; 4+	(26)
 			sta .LeftPF0B			; 3		(29)
 		lda .RightPF0A				; 3		(32)
-		sta PF0						; 3		(35)	OK to change PF0 after 29 cycles, but before 49 cycles
+		sta PF0						; 3		(35)	OK to change PF0 after 27 cycles, but before 49 cycles
 		lda .RightPF1A				; 3		(38)
 			ldx .TxtBuffer+1,y		; 4		(42) Character 1 (into left upper PF1)
-		sta PF1						; 3		(45)	OK to change PF1 after 39 cycles, but before 54 cycles
+		sta PF1						; 3		(45)	OK to change PF1 after 38 cycles, but before 54 cycles
 		lda .RightPF2A				; 3		(48)
 		nop							; 2		(50)	<- REQUIRED STALL
-		sta PF2						; 3		(53)	OK to change PF2 after 50 cycles, but before 65 cycles
+		sta PF2						; 3		(53)	OK to change PF2 after 49 cycles, but before 65 cycles
 			lda .NormFont,x			; 4+	(57)
 			and #$F0				; 2		(59)
 			sta .LeftPF1B			; 3		(62)
@@ -274,12 +273,12 @@ ReversedFont:
 			and #$0F				; 2		(30)
 			sta .LeftPF2B			; 3		(33)
 		lda .RightPF0A				; 3		(36)
-		sta PF0						; 3		(39)	OK to change PF0 after 29 cycles, but before 49 cycles
+		sta PF0						; 3		(39)	OK to change PF0 after 27 cycles, but before 49 cycles
 		lda .RightPF1A				; 3		(42)
-		sta PF1						; 3		(45)	OK to change PF1 after 39 cycles, but before 54 cycles
+		sta PF1						; 3		(45)	OK to change PF1 after 38 cycles, but before 54 cycles
 			ldx .TxtBuffer+4,y		; 4		(49) Character 4 (into left upper PF2)
 		lda .RightPF2A				; 3		(52)
-		sta PF2						; 3		(55)	OK to change PF2 after 50 cycles, but before 65 cycles
+		sta PF2						; 3		(55)	OK to change PF2 after 49 cycles, but before 65 cycles
 			lda .RevFont,x			; 4+	(59)
 			and #$F0				; 2		(61)
 			ora .LeftPF2B			; 3		(64)
@@ -299,12 +298,12 @@ ReversedFont:
 			and #$F0				; 2		(30)
 			sta .RightPF1B			; 3		(33)
 		lda .RightPF0A				; 3		(36)
-		sta PF0						; 3		(39)	OK to change PF0 after 29 cycles, but before 49 cycles
+		sta PF0						; 3		(39)	OK to change PF0 after 27 cycles, but before 49 cycles
 		lda .RightPF1A				; 3		(42)
-		sta PF1						; 3		(45)	OK to change PF1 after 39 cycles, but before 54 cycles
+		sta PF1						; 3		(45)	OK to change PF1 after 38 cycles, but before 54 cycles
 			ldx .TxtBuffer+7,y		; 4		(49) Character 7 (into right lower PF1)
 		lda .RightPF2A				; 3		(52)
-		sta PF2						; 3		(55)	OK to change PF2 after 50 cycles, but before 65 cycles
+		sta PF2						; 3		(55)	OK to change PF2 after 49 cycles, but before 65 cycles
 			lda .NormFont,x			; 4+	(59)
 			and #$0F				; 2		(61)
 			ora .RightPF1B			; 3		(64)
@@ -326,27 +325,12 @@ ReversedFont:
 			ora .RightPF2B			; 3		(35)
 			sta .RightPF2B			; 3		(38)
 		lda .RightPF0A				; 3		(41)
-		sta PF0						; 3		(44)	OK to change PF0 after 29 cycles, but before 49 cycles
+		sta PF0						; 3		(44)	OK to change PF0 after 27 cycles, but before 49 cycles
 		lda .RightPF1A				; 3		(47)
-		sta PF1						; 3		(50)	OK to change PF1 after 39 cycles, but before 54 cycles
+		sta PF1						; 3		(50)	OK to change PF1 after 38 cycles, but before 54 cycles
 		lda .RightPF2A				; 3		(53)
-		sta PF2						; 3		(56)	OK to change PF2 after 50 cycles, but before 65 cycles
+		sta PF2						; 3		(56)	OK to change PF2 after 49 cycles, but before 65 cycles
 ; 20 CPU cycles remaining every "font pixel line" (4 scanlines), hmm, what should we do with it?!
-
-; Here's a way to sort-of have one Player sprite, using one of the font characters,
-; with limited Y positioning and a four scanline offset from the top of the characters :(
-; Plus the sprite will be 8 large pixels wide, where the fonts are 4 large pixels wide :(
-; But worst, it won't be lined up to the rest of the text since this is the last scanline
-; of the four font scanlines :(
-; The _good_ news is that the X position is able to be from 0 to 159, single pixel accuracy
-; The _bad_ news is, just two more CPU cycles added to the following code will mess up everything
-		lda #0						; 2		(58)
-		cpy Player0Y				; 3		(61)
-		bne .skipPlayer0			; 2+	(63)
-		ldx Player0Txt				; 3		(66)
-		lda .SpriteFont,x			; 4+	(70)
-.skipPlayer0
-		sta GRP0					; 3		(73)
 
 			ENDM
 
@@ -418,30 +402,24 @@ AwaitNextTextRow:
 			sta COLUBK
 			stx ColorScheme
 
-	; Enable or disable Missile0 and Missile1 for this next line of text
+	; Enable or disable Missile0 for this next line of text
 			ldx #0
 			lda Missile0Y
-			bne SkipMissileEnableA0
+			bne SkipMissileEnableA
 			ldx #%00000010
-SkipMissileEnableA0:
+SkipMissileEnableA:
 			stx ENAM0
-			ldx #0
-			lda Missile1Y
-			bne SkipMissileEnableA1
-			ldx #%00000010
-SkipMissileEnableA1:
-			stx ENAM1
 
 NextTextRow:
 	; Each FONT_KERNEL macro consumes 4 scanlines
-			FONT_KERNEL PFBufferA, 1, 0, 0		; We rendered line 0 before this
-			FONT_KERNEL PFBufferB, 2, 1, 0
-			FONT_KERNEL PFBufferA, 3, 2, 0
-			FONT_KERNEL PFBufferB, 4, 3, 0
+			FONT_KERNEL PFBufferA, 1, 0		; We rendered line 0 before this
+			FONT_KERNEL PFBufferB, 2, 0
+			FONT_KERNEL PFBufferA, 3, 0
+			FONT_KERNEL PFBufferB, 4, 0
 	; The very last set of font pixels can render the first font pixel line for
 	; the upcoming text row because we want a blank line between text rows (no
 	; rasterizing)
-			FONT_KERNEL PFBufferA, 0, 4, 10		; Rendering line 0 for the next text line
+			FONT_KERNEL PFBufferA, 0, 10		; Rendering line 0 for the next text line
 
 	; Here we have four scanlines of time before we need to rasterizer out the next line of text
 
@@ -503,19 +481,13 @@ BlankScanline3:
 			adc #10					; text.
 			tay
 
-	; Enable or disable Missile0 and Missile1 for this next line of text
+	; Enable or disable Missile0 for this next line of text
 			lda #0
 			cpy Missile0Y
-			bne SkipMissileEnableB0
+			bne SkipMissileEnableB
 			lda #%00000010
-SkipMissileEnableB0:
+SkipMissileEnableB:
 			sta ENAM0
-			lda #0
-			cpy Missile1Y
-			bne SkipMissileEnableB1
-			lda #%00000010
-SkipMissileEnableB1:
-			sta ENAM1
 
 	; Should we continue displaying more lines of text?
 			cpy #[10 * 8]			; 8 lines of text
@@ -560,7 +532,7 @@ DontBumpDeciSeconds:
 			and CurrJoysticks	; Now a set bit in A means that input has a rising edge (has just been pressed)
 			tay					; Save the rising edge bits in Y, for the various states that are interested in input
 
-#if 0
+#IF 0
 	; Example of how to print the hex value for what's in the accumulator onto the screen at the end of the second line of text
 			tya
 			pha
@@ -571,7 +543,7 @@ DontBumpDeciSeconds:
 			jsr PrintHexValue
 			pla
 			tay
-#endif
+#ENDIF
 
 	; Jump into the code handling the current game state
 			jmp (StateCodePtr)
@@ -596,13 +568,13 @@ InitMainMenuCharLoop:
 			iny
 			cmp #0
 			beq InitMainMenuLineLoop
-			sty LibTempVar
+			sty MainMenuOffs
 			sec
 			sbc #32
 			tay
 			lda ASCII2Font,y
 			sta TextBuffer,x
-			ldy LibTempVar
+			ldy MainMenuOffs
 			inx
 			bne InitMainMenuCharLoop
 InitMainMenuDone:
@@ -698,10 +670,10 @@ Pow10Loop:
 			asl
 			asl
 			asl
-			sta LibTempVar		; Save the X offset for later
+			sta PresentLocOffs	; Save the X offset for later
 			lda PowersOfTen,x	; Calculate the Y offset
 			sta Missile0Y
-			lda LibTempVar
+			lda PresentLocOffs
 			clc
 			adc #2+4			; For some reason the missiles X position needs a little position bump
 			ldx #2				; Set Missile0 X offset
@@ -719,7 +691,7 @@ Pow10Loop:
 			beq PresentLocDescDone
 			cmp #$20
 			bne NotASpace
-			cpy LibTempVar		; If the text cursor is over the first character of a line, skip the output (if it's a space)
+			cpy PresentLocOffs	; If the text cursor is over the first character of a line, skip the output (if it's a space)
 			beq SkipChr
 NotASpace:
 			jsr ChrOut
@@ -805,7 +777,6 @@ DemoOneFntOK:
 			sta TextBuffer,x
 			jmp AwaitOverscan
 
-
 ;======================================-=======================================
 ;	DEMO TWO STATE INITIALIZE
 
@@ -814,9 +785,28 @@ InitDemoTwo:
 			lda #0
 			sta TextCursor		; Reset text cursor to 0,0
 			sta ColorScheme		; Reset the color scheme to all white text on a black background
+			ldx #51
+			lda #[51 * 5]
+InitDemoTwoLoop:
+			sta TextBuffer,x
+			sec
+			sbc #5
+			dex
+			bne InitDemoTwoLoop
+	; Set up a pointer to the state machine code we want to run next
+			SET_POINTER StateCodePtr, DemoTwo
 			jmp AwaitOverscan
 
+;======================================-=======================================
+;	DEMO TWO STATE
 
+DemoTwo:
+			and #JOY_BUTTON
+			beq DemoTwoContinue
+	; Set up a pointer to the state machine code we want to run next
+			SET_POINTER StateCodePtr, InitMainMenu
+DemoTwoContinue:
+			jmp AwaitOverscan
 
 ;======================================-=======================================
 ;	AWAIT THE END OF THE OVERSCAN PERIOD
@@ -844,9 +834,7 @@ ColdBoot:
 
 	; Set these Y positions to anything > 80 to disable them
 			lda #81
-			sta Player0Y
 			sta Missile0Y
-			sta Missile1Y
 
 	; Set up a pointer to the state machine code we want to run next
 			SET_POINTER StateCodePtr, InitMainMenu
@@ -881,7 +869,7 @@ ScrollBottomMsg: SUBROUTINE
 ;	IN: X - Desired horizontal character position (0 - 9)
 ;	IN: Y - Desired vertical text line position (0 - 7)
 ;	TRASHED: A, flags
-;	NOTES:
+;	!! WARNING !!:
 ;		There's no error checking here, if X/Y aren't within range, really
 ;		bad things will happen then next time ChrOut is called (like trashed
 ;		RAM/Stack)
@@ -916,26 +904,7 @@ ChrOut:		SUBROUTINE
 .noScroll:	stx TextCursor
 			rts
 
-; PrintTextStr: 
-;	IN: LibTempPtr points to the ZERO TERMINATED (C style) text string
-;	TRASHED: A, X, Y, flags
-;	NOTES:
-;		Strings longer than 255 characters can't be printed, which should be
-;		OK because there can only be 80 characters visible anyway!
-;	!! WARNING !!:
-;		There's no error checking here, if the string ends up printing beyond
-;		the bounds of the TextBuffer then really bad things will happen (like
-;		trashed RAM/Stack and this subroutine returning to some unknown
-;		location!)
-PrintTextStr:	SUBROUTINE
-			ldy #0
-.loop:		lda (LibTempPtr),y
-			beq .exit
-			jsr ChrOut
-			iny
-			bne .loop
-.exit:		rts
-
+#IF 0
 ; PrintHexValue: Output a two digit hex number for the value in A
 ;	TRASHED: A, X, Y, flags
 PrintHexValue:	SUBROUTINE
@@ -959,6 +928,7 @@ PrintHexValue:	SUBROUTINE
 			adc #6
 .notAlpha2: jsr ChrOut
 			rts
+#ENDIF
 
 ; ClearScreen: Clear the screen to the first glyph in the font
 ;	TRASHED: A, X, flags
